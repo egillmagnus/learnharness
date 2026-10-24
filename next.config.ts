@@ -83,6 +83,11 @@ const nextConfig: NextConfig = {
 		"@napi-rs/canvas", // native binding — bundling breaks the .node require
 		"@resvg/resvg-js", // native binding — same
 	],
+	experimental: {
+		// Fork addition (2026-10-24): proxy.ts (the login gate) buffers request
+		// bodies and truncates past 10 MB by default — source uploads go to 50 MB.
+		proxyClientMaxBodySize: "50mb",
+	},
 };
 
 export default nextConfig;
