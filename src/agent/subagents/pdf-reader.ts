@@ -7,6 +7,7 @@ import { providerEventObserver, type ProviderEventObserver } from "../provider-e
 import type { PdfResult, PdfToolInput } from "../../core/contracts.ts";
 import { getHeadless, type HeadlessApi } from "./headless.ts";
 import { pdfExtract, pdfInfo, pdfProbe, pdfSearch, type PdfSearchHit } from "./pdf-ops.ts";
+import { resolveSourcePath } from "../tools/fs-shared.ts";
 
 /**
  * The pdf-reader sub-agent (sources v0, 2026-09): reads a learner-provided
@@ -166,7 +167,14 @@ export async function runPdfReaderAgent(
 ): Promise<PdfResult> {
 	const headless = opts.headless ?? getHeadless();
 	const maxIterations = opts.maxIterations ?? MAX_ITERATIONS;
-	const pdfPath = input.path;
+	// The learner's PDF resolves like every learner-file path: home-anchored,
+	// and inside LH_FILES_ROOT when that is set (fork addition, 2026-10-24).
+	let pdfPath: string;
+	try {
+		pdfPath = resolveSourcePath(input.path);
+	} catch (err) {
+		return { path: input.path, question: input.question, brief: `PDF failed: ${(err as Error).message}`, pagesRead: [], pagesConsulted: [] };
+	}
 
 	// Deterministic upfront failure: unreadable / unparseable
 	// for renders — the brief never starts on a broken source.

@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -37,10 +38,31 @@ const EXCLUDED_DIR_NAMES = new Set(["node_modules", ".git", "Library", ".Trash"]
 
 /** Resolve a tool path argument: absolute stays, relative/absent → home.
  *  (pi resolves against the project cwd; the harness's "project" is the
- *  learner's life, so the home directory is the anchor.) */
+ *  learner's life, so the home directory is the anchor.)
+ *  Fork addition (2026-10-24): when LH_FILES_ROOT is set — a self-hosted
+ *  server whose home holds more than study material — every path must
+ *  resolve (symlinks followed) inside that root, or the call throws and
+ *  the model sees the error. */
 export function resolveSourcePath(p?: string): string {
-	if (!p) return os.homedir();
-	return path.isAbsolute(p) ? p : path.join(os.homedir(), p);
+	const resolved = !p ? os.homedir() : path.isAbsolute(p) ? p : path.join(os.homedir(), p);
+	const root = process.env.LH_FILES_ROOT;
+	if (root && !isInside(realOrResolved(root), realOrResolved(resolved))) {
+		throw new Error(`Access denied: ${p ?? "~"} is outside the learner's files (${root}).`);
+	}
+	return resolved;
+}
+
+function realOrResolved(p: string): string {
+	try {
+		return realpathSync(p);
+	} catch {
+		return path.resolve(p); // missing paths can't be read anyway; compare lexically
+	}
+}
+
+function isInside(root: string, target: string): boolean {
+	const rel = path.relative(root, target);
+	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
 /** pi's formatSize idiom (50KB prints as "50.0KB"). */

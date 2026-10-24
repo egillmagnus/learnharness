@@ -1,8 +1,7 @@
 /**
  * The login gate (fork addition, 2026-10-24) — see lib/login-gate.ts.
- * Inert unless LH_LOGIN_PASSWORD_HASH is set. Redirects use relative
- * Location headers: behind a reverse proxy request.url is the internal
- * address, not the one the browser used.
+ * Inert unless LH_LOGIN_PASSWORD_HASH is set. Proxy redirects must be
+ * absolute; nextUrl takes its host from the forwarded headers.
  */
 import { NextResponse, type NextRequest } from "next/server";
 import { COOKIE, gateEnabled, validToken } from "@/lib/login-gate";
@@ -18,8 +17,10 @@ export function proxy(request: NextRequest) {
 	if (pathname.startsWith("/api/")) {
 		return Response.json({ error: "not signed in" }, { status: 401 });
 	}
-	const next = pathname === "/" ? "" : `?next=${encodeURIComponent(pathname + search)}`;
-	return new Response(null, { status: 307, headers: { location: `/login${next}` } });
+	const login = request.nextUrl.clone();
+	login.pathname = "/login";
+	login.search = pathname === "/" ? "" : `?next=${encodeURIComponent(pathname + search)}`;
+	return NextResponse.redirect(login);
 }
 
 export const config = {
