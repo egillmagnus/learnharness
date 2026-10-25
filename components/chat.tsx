@@ -2021,18 +2021,43 @@ function DockOverlay({
 	// off absurdly short — the cap is now the AVAILABLE COLUMN (the
 	// scroller already starts below the top bar) minus a 2rem breathing
 	// gap, carried as --dock-max-h for the docks' scroll areas.
+	// The cap leaves room for the dock's fixed rows too (fork, 2026-10-25):
+	// on a phone the confidence row, thinking box and stats bar under the
+	// question pushed the card's top above the screen, out of reach.
 	const [sbInset, setSbInset] = useState(0);
 	const [dockMaxH, setDockMaxH] = useState<number | null>(null);
+	const dockFixedRef = useRef(0);
 	useEffect(() => {
 		const el = scrollRef.current;
 		if (!el) return;
+		// Mid-morph heights are animated values, so a measure that lands
+		// during one retries after it; a folded dock keeps its question area
+		// mounted but clipped (taller than the block), so it measures nothing.
+		let retry: ReturnType<typeof setTimeout> | undefined;
 		const measure = () => {
 			setSbInset(Math.round((el.offsetWidth - el.clientWidth) / 2));
-			setDockMaxH(Math.max(el.clientHeight - 32, 160));
+			const block = blockRef.current;
+			const area = block?.querySelector<HTMLElement>("[data-dock-scroll]");
+			if (block && area) {
+				if (block.getAnimations({ subtree: true }).length > 0) {
+					clearTimeout(retry);
+					retry = setTimeout(measure, 150);
+				} else {
+					const fixed = block.getBoundingClientRect().height - area.getBoundingClientRect().height;
+					if (fixed > 0) dockFixedRef.current = fixed;
+				}
+			}
+			setDockMaxH(Math.round(Math.max(el.clientHeight - 16 - dockFixedRef.current, 120)));
 		};
 		measure();
+		const ro = new ResizeObserver(measure);
+		if (blockRef.current) ro.observe(blockRef.current);
 		window.addEventListener("resize", measure);
-		return () => window.removeEventListener("resize", measure);
+		return () => {
+			clearTimeout(retry);
+			ro.disconnect();
+			window.removeEventListener("resize", measure);
+		};
 	}, [scrollRef]);
 
 	// GROWTH MUTE (owner round, 2026-10-05 — the generation churn): during a

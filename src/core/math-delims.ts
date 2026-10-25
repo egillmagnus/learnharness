@@ -327,7 +327,24 @@ const DISPLAY_DEBRIS_RE = /[\b\t\v\f\r]/;
 
 /** Shared display-only repair. Keep raw arguments and model history unchanged. */
 export function repairMathForDisplay(text: string): string {
-	return healOverescapedCommands(restoreMathEscapes(text));
+	return healOverescapedCommands(restoreMathEscapes(restoreEscapedNewlines(text)));
+}
+
+/** Some models (GLM, fork note 2026-10-25) double-escape newlines in tool
+ *  arguments, so a question arrives as one line with literal `\n` text
+ *  ("runs on:\n\n```java\nif …") and its code fence never opens. Only
+ *  text with NO real newline and an unmistakable double-escape (`\n\n`
+ *  or `\n` before a fence) is touched, and math spans are left alone so
+ *  `$x \neq y$` keeps its command. */
+const MATH_SPAN_RE = /(\$\$[\s\S]*?\$\$|\$[^$]*\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\])/;
+const ESCAPED_NEWLINE_RE = /(?<!\\)((?:\\\\)*)\\n/g;
+
+export function restoreEscapedNewlines(text: string): string {
+	if (text.includes("\n") || !/(?<!\\)(?:\\\\)*\\n(?:\\n|```)/.test(text)) return text;
+	return text
+		.split(MATH_SPAN_RE)
+		.map((seg, i) => (i % 2 === 1 ? seg : seg.replace(ESCAPED_NEWLINE_RE, "$1\n")))
+		.join("");
 }
 
 export function restoreMathEscapes(text: string): string {
@@ -503,10 +520,16 @@ function restoreDollarMathEscapes(text: string): string {
  */
 const COMMAND_START_CLASS = "[A-Za-z,;:!|]";
 
+/** Set braces (fork, 2026-10-25: GLM writes `\\{3, 7\\}`) join the class
+ *  only in spans with no environment — outside `\begin…` a row break means
+ *  nothing, so a doubled `\\{` can only be a doubled `\{`. */
+const BRACE_START_CLASS = "[A-Za-z,;:!|{}]";
+
 /** Collapse even backslash runs before a command start; keep odd runs. */
 function halveOverescapedCommandRuns(inner: string): string {
+	const starts = /\\+begin\{/.test(inner) ? COMMAND_START_CLASS : BRACE_START_CLASS;
 	return inner.replace(
-		new RegExp("(\\\\+)(?=" + COMMAND_START_CLASS + ")", "g"),
+		new RegExp("(\\\\+)(?=" + starts + ")", "g"),
 		(run: string) => (run.length % 2 === 0 ? "\\" : run),
 	);
 }
