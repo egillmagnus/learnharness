@@ -27,14 +27,20 @@ function page(next: string, error?: string, status = 200): Response {
 <html lang="en" class="dark"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in · Learning Harness</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Learn">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="theme-color" content="#141414">
 <style>
 	:root { color-scheme: dark; }
 	body { margin: 0; min-height: 100dvh; display: grid; place-items: center; background: #0b0b0c; color: #e8e8ea;
 		font: 15px/1.5 ui-monospace, "JetBrains Mono", monospace; }
 	form { width: min(320px, calc(100vw - 32px)); display: grid; gap: 14px; }
 	h1 { font: 600 20px/1.2 Georgia, serif; margin: 0 0 6px; }
-	input[type=password] { padding: 10px 12px; border-radius: 8px; border: 1px solid #333; background: #141416; color: inherit; font: inherit; }
-	input[type=password]:focus { outline: 2px solid #6b8afd; outline-offset: 1px; }
+	input[type=password], input[type=text] { padding: 10px 12px; border-radius: 8px; border: 1px solid #333; background: #141416; color: inherit; font: inherit; font-size: 16px; }
+	input:focus { outline: 2px solid #6b8afd; outline-offset: 1px; }
 	label { display: flex; gap: 8px; align-items: center; color: #b4b4b8; }
 	button { padding: 10px; border: 0; border-radius: 8px; background: #e8e8ea; color: #0b0b0c; font: inherit; font-weight: 600; cursor: pointer; }
 	.err { color: #ff7b72; margin: 0; }

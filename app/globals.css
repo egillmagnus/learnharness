@@ -598,3 +598,13 @@ body {
 	outline: 1px solid var(--border);
 	border-radius: 0.25rem;
 }
+
+/* Phones (fork addition, 2026-10-25): iOS Safari zooms the page into any
+   focused field whose text is under 16px; keep fields at 16px there. */
+@media (max-width: 767px) {
+	input,
+	textarea,
+	select {
+		font-size: 16px !important;
+	}
+}

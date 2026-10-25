@@ -8,7 +8,18 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { COOKIE, gateEnabled, tokenUser, USER_HEADER } from "@/lib/login-gate";
 
-const OPEN_PATHS = new Set(["/login", "/logout"]);
+// The home-screen manifest and icons: iOS fetches them while adding the
+// app, possibly without the session cookie.
+const OPEN_PATHS = new Set([
+	"/login",
+	"/logout",
+	"/set-password",
+	"/manifest.webmanifest",
+	"/apple-icon.png",
+	"/icon.png",
+	"/icon-192.png",
+	"/icon-512.png",
+]);
 
 export function proxy(request: NextRequest) {
 	const forwarded = new Headers(request.headers);

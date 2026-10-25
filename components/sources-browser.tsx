@@ -131,7 +131,7 @@ export function SourcesBrowser() {
 		<div className="flex h-dvh flex-col">
 			<TopBar>
 				<h1 className="font-title text-3xl tracking-tight">Sources</h1>
-				<span className="text-xs text-muted-foreground">
+				<span className="text-xs text-muted-foreground max-md:hidden">
 					Course material the teacher can read. In a chat, name the course and section.
 				</span>
 			</TopBar>
@@ -141,9 +141,9 @@ export function SourcesBrowser() {
 					Sources are off on this server (LH_SOURCES_DIR is not set).
 				</p>
 			) : (
-				<div className="flex min-h-0 flex-1">
+				<div className="flex min-h-0 flex-1 max-md:flex-col">
 					{/* Courses */}
-					<aside className="flex w-64 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border p-3">
+					<aside className="flex w-64 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border p-3 max-md:max-h-[40dvh] max-md:w-full max-md:border-b max-md:border-r-0">
 						<span className="mb-1 text-xs uppercase tracking-widest text-muted-foreground/70">Courses</span>
 						{courses?.map((course) => (
 							<button
@@ -212,7 +212,8 @@ export function SourcesBrowser() {
 									/>
 									<Button variant="outline" size="sm" disabled={busy !== null} onClick={() => fileInputRef.current?.click()}>
 										<UploadIcon className="size-3.5" />
-										Upload files
+										<span className="max-md:hidden">Upload files</span>
+										<span className="md:hidden">Upload</span>
 									</Button>
 									{current.files.length === 0 && (
 										<Button variant="ghost" size="sm" disabled={busy !== null} onClick={() => remove(current.name)}>
@@ -237,7 +238,7 @@ export function SourcesBrowser() {
 											<tr className="text-left text-xs uppercase tracking-wider text-muted-foreground/70">
 												<th className="py-1.5 font-normal">Name</th>
 												<th className="w-24 py-1.5 font-normal">Size</th>
-												<th className="w-32 py-1.5 font-normal">Added</th>
+												<th className="w-32 py-1.5 font-normal max-md:hidden">Added</th>
 												<th className="w-10" />
 											</tr>
 										</thead>
@@ -256,7 +257,7 @@ export function SourcesBrowser() {
 														</a>
 													</td>
 													<td className="py-1.5 text-muted-foreground">{formatBytes(file.size)}</td>
-													<td className="py-1.5 text-muted-foreground">{new Date(file.modified).toLocaleDateString()}</td>
+													<td className="py-1.5 text-muted-foreground max-md:hidden">{new Date(file.modified).toLocaleDateString()}</td>
 													<td className="py-1.5 text-right">
 														<Button
 															variant="ghost"
