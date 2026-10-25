@@ -11,9 +11,13 @@
  * sub-agent jobs have their own cost channels elsewhere.
  */
 import { graphCosts } from "@/src/server";
+import { withUser } from "@/lib/with-user";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+async function handleGET() {
 	return Response.json(graphCosts());
 }
+
+// Fork addition (2026-10-24): runs as the signed-in user (lib/with-user.ts).
+export const GET = withUser(handleGET);

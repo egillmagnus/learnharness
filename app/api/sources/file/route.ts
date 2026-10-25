@@ -7,10 +7,11 @@
 import { readFile } from "node:fs/promises";
 import * as path from "node:path";
 import { contentTypeFor, SourcesError, sourceFilePath } from "@/lib/sources-store";
+import { withUser } from "@/lib/with-user";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
+async function handleGET(req: Request) {
 	const params = new URL(req.url).searchParams;
 	let file: string;
 	try {
@@ -39,3 +40,6 @@ export async function GET(req: Request) {
 		},
 	});
 }
+
+// Fork addition (2026-10-24): runs as the signed-in user (lib/with-user.ts).
+export const GET = withUser(handleGET);

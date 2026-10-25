@@ -12,8 +12,9 @@
 // chat's next run.
 import { ChatInputError, newUserSteer, parseUserSteerInput } from "@/src/core";
 import { getChat, steerLiveChat } from "@/src/server";
+import { withUser } from "@/lib/with-user";
 
-export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+async function handlePOST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
 	const { id } = await ctx.params;
 	if (!getChat(id)) return Response.json({ error: "unknown chat" }, { status: 404 });
 	let input;
@@ -30,3 +31,6 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
 	}
 	return Response.json({ ok: true });
 }
+
+// Fork addition (2026-10-24): runs as the signed-in user (lib/with-user.ts).
+export const POST = withUser(handlePOST);

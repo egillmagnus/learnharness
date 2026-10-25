@@ -17,13 +17,17 @@
  */
 
 import { effectivePromptSegments, readSettingsRecord } from "@/src/server";
+import { withUser } from "@/lib/with-user";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+async function handleGET() {
 	const switches = readSettingsRecord()?.agent?.prompts ?? {};
 	return Response.json({
 		prober: effectivePromptSegments("prober", switches),
 		teacher: effectivePromptSegments("teacher", switches),
 	});
 }
+
+// Fork addition (2026-10-24): runs as the signed-in user (lib/with-user.ts).
+export const GET = withUser(handleGET);

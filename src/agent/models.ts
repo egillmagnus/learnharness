@@ -9,7 +9,10 @@ import {
 } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { type ModelRole } from "../../config.ts";
+import * as fs from "node:fs";
+import { authFile, type ModelRole } from "../../config.ts";
+import { multiUser } from "../../user-context.ts";
+import { AUTH_PROVIDER_KEYS } from "../core/auth-keys.ts";
 import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
 
@@ -63,7 +66,25 @@ export function piModels() {
 
 /** OpenRouter API key (BYOK); tests never read this — they inject engines. */
 export function openRouterApiKey(): string | undefined {
+	if (multiUser()) return userKeyOption("openrouter").apiKey;
 	return process.env.OPENROUTER_API_KEY || undefined;
+}
+
+/** MULTI-USER (fork addition, 2026-10-24): the calling user's key for
+ *  this provider, read from their auth file on every request. Single-user
+ *  returns nothing and pi-ai reads the env as before; multi-user the env
+ *  holds no keys (keys.ts initAuthEnv), so a user without a key gets
+ *  pi-ai's "not configured" error, never another user's key. */
+function userKeyOption(provider: string): { apiKey?: string } {
+	if (!multiUser()) return {};
+	const envVar = AUTH_PROVIDER_KEYS.find((p) => p.id === provider)?.envVar;
+	if (!envVar) return {};
+	try {
+		const value = (JSON.parse(fs.readFileSync(authFile(), "utf-8")) as Record<string, unknown>)[envVar];
+		return typeof value === "string" && value.trim() ? { apiKey: value.trim() } : {};
+	} catch {
+		return {};
+	}
 }
 
 /** A fully-resolved model pin — the shape every engine now comes from:
@@ -114,6 +135,7 @@ export function piEngineForSpec(spec: ResolvedModelSpec): PiEngine {
 		streamFn: (requestModel, context, options) =>
 			models.streamSimple(requestModel, context, {
 				...options,
+				...userKeyOption(requestModel.provider),
 				reasoning: level === "off" ? undefined : level,
 			}),
 	};

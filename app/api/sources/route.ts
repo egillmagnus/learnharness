@@ -16,6 +16,7 @@ import {
 	SourcesError,
 	sourcesRoot,
 } from "@/lib/sources-store";
+import { withUser } from "@/lib/with-user";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ function failure(error: unknown): Response {
 	return Response.json({ error: "Something went wrong on the server." }, { status: 500 });
 }
 
-export async function GET() {
+async function handleGET() {
 	if (!sourcesRoot()) return Response.json({ enabled: false, courses: [] });
 	try {
 		return Response.json({ enabled: true, courses: await listCourses() });
@@ -34,7 +35,7 @@ export async function GET() {
 	}
 }
 
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
 	let form: FormData;
 	try {
 		form = await req.formData();
@@ -55,7 +56,7 @@ export async function POST(req: Request) {
 	}
 }
 
-export async function DELETE(req: Request) {
+async function handleDELETE(req: Request) {
 	const params = new URL(req.url).searchParams;
 	try {
 		const file = params.get("path");
@@ -66,3 +67,8 @@ export async function DELETE(req: Request) {
 		return failure(error);
 	}
 }
+
+// Fork addition (2026-10-24): runs as the signed-in user (lib/with-user.ts).
+export const GET = withUser(handleGET);
+export const POST = withUser(handlePOST);
+export const DELETE = withUser(handleDELETE);

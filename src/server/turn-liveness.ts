@@ -21,6 +21,7 @@
  */
 
 import { emit } from "../core/events.ts";
+import { userScopedKey } from "../core/user-scope.ts";
 
 interface LhGlobal {
 	__lhTurnRegistry?: Map<string, number>;
@@ -43,7 +44,7 @@ const MAX_TURN_MS = 30 * 60_000;
  */
 export function beginTurn(chatId: string): boolean {
 	if (isTurnRunning(chatId)) return false;
-	inFlight.set(chatId, Date.now());
+	inFlight.set(userScopedKey(chatId), Date.now());
 	emit("turn-started", { chatId });
 	return true;
 }
@@ -55,7 +56,7 @@ export function beginTurn(chatId: string): boolean {
  * defensive no-op endTurn must not fire a spurious settle.
  */
 export function endTurn(chatId: string): void {
-	if (inFlight.delete(chatId)) emit("turn-settled", { chatId });
+	if (inFlight.delete(userScopedKey(chatId))) emit("turn-settled", { chatId });
 }
 
 /** True while the chat's turn is in flight; lazily evicts stale entries.
@@ -64,10 +65,10 @@ export function endTurn(chatId: string): void {
  * from a read, and emitting from a read is a side-effect smell. Silence
  * here is a choice, not an oversight. */
 export function isTurnRunning(chatId: string): boolean {
-	const since = inFlight.get(chatId);
+	const since = inFlight.get(userScopedKey(chatId));
 	if (since === undefined) return false;
 	if (Date.now() - since > MAX_TURN_MS) {
-		inFlight.delete(chatId);
+		inFlight.delete(userScopedKey(chatId));
 		return false;
 	}
 	return true;

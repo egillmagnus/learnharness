@@ -22,6 +22,8 @@
  * server, store, and agent may all depend on.
  */
 
+import { currentUserId } from "./user-scope.ts";
+
 /** The full event vocabulary — fixed from day one (slice plan, 2026-10-02). */
 export interface ServerEvents {
 	/** A teach turn began server-side (beginTurn) — client-initiated sends,
@@ -73,13 +75,21 @@ export type ServerEvent<K extends ServerEventType = ServerEventType> = {
 export type ServerEventListener = (event: ServerEvent) => void;
 
 interface LhEventsGlobal {
-	__lhEventBus?: Set<ServerEventListener>;
+	__lhEventBus?: Set<ScopedListener>;
+}
+
+/** A listener plus the user it was registered for (multi-user, fork
+ *  addition 2026-10-24): an event reaches only listeners of the user it
+ *  was emitted for. Single-user both sides are undefined and match. */
+interface ScopedListener {
+	listener: ServerEventListener;
+	user: string | undefined;
 }
 
 /** The shared listener set — globalThis-backed so every Next module entry
  *  (and every layer) sees ONE bus. Ephemeral by design: a process restart
  *  drops the listeners with their connections; emitters never queue. */
-function listeners(): Set<ServerEventListener> {
+function listeners(): Set<ScopedListener> {
 	const g = globalThis as typeof globalThis & LhEventsGlobal;
 	return (g.__lhEventBus ??= new Set());
 }
@@ -88,8 +98,9 @@ function listeners(): Set<ServerEventListener> {
  *  any test cleanup call it; a dropped listener leaks nothing. */
 export function subscribe(listener: ServerEventListener): () => void {
 	const set = listeners();
-	set.add(listener);
-	return () => set.delete(listener);
+	const entry: ScopedListener = { listener, user: currentUserId() };
+	set.add(entry);
+	return () => set.delete(entry);
 }
 
 /** Notify every listener. Zero subscribers is a no-op (no window open —
@@ -99,7 +110,9 @@ export function subscribe(listener: ServerEventListener): () => void {
 export function emit<K extends ServerEventType>(type: K, payload: ServerEvents[K]): void {
 	// Snapshot: a listener that unsubscribes (or subscribes) mid-emit must
 	// not mutate the set under iteration.
-	for (const listener of [...listeners()]) {
+	const user = currentUserId();
+	for (const { listener, user: listenerUser } of [...listeners()]) {
+		if (listenerUser !== user) continue;
 		try {
 			listener({ type, ...payload } as ServerEvent);
 		} catch (err) {

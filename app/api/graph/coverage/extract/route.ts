@@ -11,10 +11,11 @@
  * by the pipeline and leave coverage untouched — the button stays honest.
  */
 import { extraction, extractionStatuses } from "@/src/server";
+import { withUser } from "@/lib/with-user";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
 	let body: unknown;
 	try {
 		body = await request.json();
@@ -35,3 +36,6 @@ export async function POST(request: Request) {
 	});
 	return Response.json({ started: true }, { status: 202 });
 }
+
+// Fork addition (2026-10-24): runs as the signed-in user (lib/with-user.ts).
+export const POST = withUser(handlePOST);

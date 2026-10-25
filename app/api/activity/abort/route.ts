@@ -18,8 +18,9 @@
  * flight is success — the blob is gone either way) -> 200.
  */
 import { abortExtraction, abortJob, abortTurn } from "@/src/server";
+import { withUser } from "@/lib/with-user";
 
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
 	let body: unknown;
 	try {
 		body = await req.json();
@@ -52,3 +53,6 @@ export async function POST(req: Request) {
 	abortExtraction(id);
 	return Response.json({ ok: true });
 }
+
+// Fork addition (2026-10-24): runs as the signed-in user (lib/with-user.ts).
+export const POST = withUser(handlePOST);

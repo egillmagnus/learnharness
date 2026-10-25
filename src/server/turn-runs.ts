@@ -27,6 +27,7 @@
  */
 
 import type { PiTurnHandle } from "./pi/ui-stream.ts";
+import { userScopedKey } from "../core/user-scope.ts";
 
 interface LhTurnRunsGlobal {
 	__lhTurnRuns?: Map<string, PiTurnHandle>;
@@ -40,25 +41,25 @@ function runs(): Map<string, PiTurnHandle> {
 /** Register the chat's running turn (chat-handler, right after the turn
  *  starts). One per chat by construction — the 409 guard. */
 export function registerTurn(chatId: string, handle: PiTurnHandle): void {
-	runs().set(chatId, handle);
+	runs().set(userScopedKey(chatId), handle);
 }
 
 /** Unregister at settle — chat-handler's onFinish, LAST (after endTurn). */
 export function unregisterTurn(chatId: string): void {
-	runs().delete(chatId);
+	runs().delete(userScopedKey(chatId));
 }
 
 /** The live turn handle for a chat, or undefined — the subscribe endpoint's
  *  and the abort channel's resolution point. */
 export function runningTurn(chatId: string): PiTurnHandle | undefined {
-	return runs().get(chatId);
+	return runs().get(userScopedKey(chatId));
 }
 
 /** The remote kill: any client (original sender, reattached viewer, future
  *  surfaces) may stop a running turn. not_running mirrors abortJob's
  *  honest 409 — there was nothing to abort, the caller refetches. */
 export function abortTurn(chatId: string): { ok: true } | { ok: false; reason: "not_running" } {
-	const handle = runs().get(chatId);
+	const handle = runs().get(userScopedKey(chatId));
 	if (!handle) return { ok: false, reason: "not_running" };
 	handle.abort();
 	return { ok: true };

@@ -48,6 +48,7 @@ import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
 import type { PiEngine } from "../agent/models.ts";
 import { runSubagent } from "../agent/subagents/pi-run.ts";
+import { userScopedKey } from "../core/user-scope.ts";
 
 /** The summarizer's system prompt — server-owned operational framing,
  *  not model-facing doctrine (buildCompactionPrompt carries the shape). */
@@ -121,13 +122,13 @@ function state(): CompactionState {
 /** Is a compaction running for this chat? (The client status event's
  *  server-side twin — tests and the SSE emitter read it.) */
 export function compactionInFlight(chatId: string): boolean {
-	return state().inFlight.has(chatId);
+	return state().inFlight.has(userScopedKey(chatId));
 }
 
 /** Await any in-flight compaction for the chat — the structural gate
  *  every model interaction for the chat passes through. */
 export async function awaitCompaction(chatId: string): Promise<void> {
-	const running = state().inFlight.get(chatId);
+	const running = state().inFlight.get(userScopedKey(chatId));
 	if (running) await running;
 }
 
@@ -270,13 +271,13 @@ export async function ensureCompacted(deps: CompactionDeps, chatId: string): Pro
 	const record = deps.chatStore.getChat(chatId);
 	if (!record) return;
 	if (projectedContextTokens(record.messages, deps.systemPromptTokens) <= deps.thresholdTokens) return;
-	if (state().inFlight.has(chatId)) return; // a concurrent caller started it while we awaited
+	if (state().inFlight.has(userScopedKey(chatId))) return; // a concurrent caller started it while we awaited
 	const run = compact(deps, chatId);
-	state().inFlight.set(chatId, run);
+	state().inFlight.set(userScopedKey(chatId), run);
 	try {
 		await run;
 	} finally {
-		state().inFlight.delete(chatId);
+		state().inFlight.delete(userScopedKey(chatId));
 	}
 }
 
@@ -289,13 +290,13 @@ export async function ensureCompacted(deps: CompactionDeps, chatId: string): Pro
  * whatever this leaves running.
  */
 export function kickCompaction(buildDeps: () => CompactionDeps | null, chatId: string): void {
-	if (state().inFlight.has(chatId)) return;
+	if (state().inFlight.has(userScopedKey(chatId))) return;
 	const deps = buildDeps();
 	if (!deps) return;
 	const record = deps.chatStore.getChat(chatId);
 	if (!record) return;
 	if (projectedContextTokens(record.messages, deps.systemPromptTokens) <= deps.thresholdTokens) return;
 	const run = compact(deps, chatId);
-	state().inFlight.set(chatId, run);
-	void run.finally(() => state().inFlight.delete(chatId));
+	state().inFlight.set(userScopedKey(chatId), run);
+	void run.finally(() => state().inFlight.delete(userScopedKey(chatId)));
 }

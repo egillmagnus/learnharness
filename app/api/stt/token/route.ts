@@ -14,8 +14,9 @@
  * keys return FORBIDDEN here.
  */
 import { keyValue } from "@/src/server";
+import { withUser } from "@/lib/with-user";
 
-export async function GET() {
+async function handleGET() {
 	const key = keyValue("DEEPGRAM_API_KEY");
 	if (!key) {
 		return Response.json(
@@ -46,3 +47,6 @@ export async function GET() {
 		return Response.json({ message: "Deepgram unreachable" }, { status: 502 });
 	}
 }
+
+// Fork addition (2026-10-24): runs as the signed-in user (lib/with-user.ts).
+export const GET = withUser(handleGET);

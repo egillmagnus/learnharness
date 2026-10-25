@@ -21,8 +21,9 @@
  */
 import { ChatInputError, dismissAppends, emit, parseDismissInput } from "@/src/core";
 import { getChat, isTurnRunning, parkDismissal, stores } from "@/src/server";
+import { withUser } from "@/lib/with-user";
 
-export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+async function handlePOST(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
 	const { id } = await ctx.params;
 	const chat = getChat(id);
 	if (!chat) return Response.json({ error: "Unknown chat" }, { status: 404 });
@@ -63,3 +64,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 	emit("record-changed", { chatId: id });
 	return Response.json({ ok: true });
 }
+
+// Fork addition (2026-10-24): runs as the signed-in user (lib/with-user.ts).
+export const POST = withUser(handlePOST);

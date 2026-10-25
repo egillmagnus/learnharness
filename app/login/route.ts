@@ -1,10 +1,11 @@
 /**
- * GET /login — the password form; POST /login — check it and issue the
- * session cookie (fork addition, 2026-10-24; see lib/login-gate.ts).
+ * GET /login — the sign-in form (username + password when multi-user);
+ * POST /login — check it and issue the session cookie (fork addition, 2026-10-24; see lib/login-gate.ts).
  * A plain HTML route, outside the app shell, so nothing behind the gate
  * loads before sign-in.
  */
-import { checkPassword, COOKIE, gateEnabled, issueToken, REMEMBER_MS, safeNext } from "@/lib/login-gate";
+import { authenticate, COOKIE, gateEnabled, issueToken, REMEMBER_MS, safeNext } from "@/lib/login-gate";
+import { multiUser } from "@/user-context";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +42,8 @@ function page(next: string, error?: string, status = 200): Response {
 <body><form method="post" action="/login">
 	<h1>Learning Harness</h1>
 	${error ? `<p class="err">${escapeHtml(error)}</p>` : ""}
-	<input type="password" name="password" placeholder="Password" autocomplete="current-password" autofocus required>
+	${multiUser() ? `<input type="text" name="username" placeholder="Username" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus required>` : ""}
+	<input type="password" name="password" placeholder="Password" autocomplete="current-password" ${multiUser() ? "" : "autofocus "}required>
 	<label><input type="checkbox" name="remember" checked> Remember me on this device</label>
 	<input type="hidden" name="next" value="${escapeHtml(next)}">
 	<button type="submit">Sign in</button>
@@ -68,17 +70,18 @@ export async function POST(req: Request) {
 		return page(next, "Too many attempts. Try again in 15 minutes.", 429);
 	}
 
-	if (!checkPassword(String(form.get("password") ?? ""))) {
+	const user = authenticate(String(form.get("username") ?? ""), String(form.get("password") ?? ""));
+	if (user === null) {
 		const r = failures.get(id) ?? { count: 0, since: now };
 		r.count += 1;
 		failures.set(id, r);
 		await new Promise((resolve) => setTimeout(resolve, 600));
-		return page(next, "Wrong password.", 401);
+		return page(next, multiUser() ? "Wrong username or password." : "Wrong password.", 401);
 	}
 
 	failures.delete(id);
 	const remember = form.get("remember") != null;
-	const token = issueToken(remember, now);
+	const token = issueToken(remember, user, now);
 	const secure = req.headers.get("x-forwarded-proto") === "https" || new URL(req.url).protocol === "https:";
 	const cookie = [
 		`${COOKIE}=${token.value}`,

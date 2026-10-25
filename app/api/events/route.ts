@@ -7,9 +7,13 @@
  * wrapper (the import law; tests drive the seam directly).
  */
 import { eventsResponse } from "@/src/server";
+import { withUser } from "@/lib/with-user";
 
 export const dynamic = "force-dynamic";
 
-export function GET(): Response {
+function handleGET(): Response {
 	return eventsResponse();
 }
+
+// Fork addition (2026-10-24): runs as the signed-in user (lib/with-user.ts).
+export const GET = withUser(handleGET);

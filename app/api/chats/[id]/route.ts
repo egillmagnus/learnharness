@@ -1,6 +1,7 @@
 import { compactionInFlight, deleteChatSession, getChat, isTurnRunning, sessionCoverage, stores, type ChatDeleteMode } from "@/src/server";
+import { withUser } from "@/lib/with-user";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+async function handleGET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
 	const chat = getChat(id);
 	if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
@@ -30,7 +31,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
  * deliberately NOT bumped: a rename must not reorder the sidebar (same
  * rule as the settings PUT).
  */
-export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
+async function handlePUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
 	if (!getChat(id)) return Response.json({ error: "Not found" }, { status: 404 });
 	const body = (await req.json().catch(() => null)) as { title?: unknown } | null;
@@ -62,7 +63,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
  * response carries what was removed plus the new graphRevision (the
  * version stamp the UI polls to refetch clusters/layout).
  */
-export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+async function handleDELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
 	const mode = new URL(req.url).searchParams.get("mode");
 	if (mode !== "preserve-graph" && mode !== "delete-nodes") {
@@ -94,3 +95,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
 	});
 }
 
+// Fork addition (2026-10-24): runs as the signed-in user (lib/with-user.ts).
+export const GET = withUser(handleGET);
+export const PUT = withUser(handlePUT);
+export const DELETE = withUser(handleDELETE);

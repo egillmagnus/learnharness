@@ -18,6 +18,8 @@
  * (status error "Aborted by learner" + the abort steer); the runner only unwinds.
  */
 
+import { userScopedKey } from "../../core/user-scope.ts";
+
 interface LhAbortGlobal {
 	__lhJobAborts?: Map<string, AbortController>;
 }
@@ -29,12 +31,12 @@ function registry(): Map<string, AbortController> {
 
 /** The runner registers its controller at job start (idempotent overwrite). */
 export function registerJobAbort(jobId: string, controller: AbortController): void {
-	registry().set(jobId, controller);
+	registry().set(userScopedKey(jobId), controller);
 }
 
 /** The runner unregisters in its finally block (job settled or unwound). */
 export function unregisterJobAbort(jobId: string): void {
-	registry().delete(jobId);
+	registry().delete(userScopedKey(jobId));
 }
 
 /** True while the job's loop is EXECUTING (a controller is registered) —
@@ -46,7 +48,7 @@ export function unregisterJobAbort(jobId: string): void {
  *  runs only after deliver() resolves, by which point finalizeJob has
  *  flipped the record — so absence of registration is unambiguous. */
 export function isJobLive(jobId: string): boolean {
-	return registry().has(jobId);
+	return registry().has(userScopedKey(jobId));
 }
 
 /** Abort a running job's loop. Returns false when no controller is live —
@@ -54,9 +56,9 @@ export function isJobLive(jobId: string): boolean {
  * phase where the runner has already returned); the caller then owns the
  * whole abort on the record side. */
 export function fireJobAbort(jobId: string): boolean {
-	const controller = registry().get(jobId);
+	const controller = registry().get(userScopedKey(jobId));
 	if (!controller) return false;
-	registry().delete(jobId);
+	registry().delete(userScopedKey(jobId));
 	controller.abort();
 	return true;
 }

@@ -1,4 +1,5 @@
 import { graphView } from "@/src/server";
+import { withUser } from "@/lib/with-user";
 
 /**
  * The home graph view's data endpoint (W4; vision §1 "Home page") — thin
@@ -8,6 +9,9 @@ import { graphView } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+async function handleGET() {
 	return Response.json(graphView());
 }
+
+// Fork addition (2026-10-24): runs as the signed-in user (lib/with-user.ts).
+export const GET = withUser(handleGET);

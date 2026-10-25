@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { requireUser } from "./user-context.ts";
 
 /** Repository root (this file is at <root>/config.ts). */
 export const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -14,22 +15,38 @@ export const ROOT = path.dirname(fileURLToPath(import.meta.url));
  * byte-for-byte as before. Read-only assets (prompts) stay ROOT-anchored
  * on purpose: they ship inside the app bundle by design.
  */
-const DATA_ROOT = process.env.LH_DATA_DIR
+const SINGLE_USER_DATA_ROOT = process.env.LH_DATA_DIR
 	? path.resolve(process.env.LH_DATA_DIR)
 	: path.join(ROOT, "data");
+
+/** Multi-user (fork addition, 2026-10-24 — user-context.ts): every data
+ *  path below resolves per call to the CURRENT user's dir, which is why
+ *  they are getters and functions rather than constants. Single-user it
+ *  is LH_DATA_DIR / repo data/, as before. */
+function dataRoot(): string {
+	return requireUser("data dir")?.dataDir ?? SINGLE_USER_DATA_ROOT;
+}
 
 export const PATHS = {
 	root: ROOT,
 	/** Teacher system prompt — the agent's instructions (src/agent/). */
 	teacherPrompt: path.join(ROOT, "src", "agent", "system-prompt.md"),
-	data: DATA_ROOT,
+	get data() {
+		return dataRoot();
+	},
 	/** Chat sessions (AI SDK UIMessage transcripts, one JSON file per chat). */
-	chats: path.join(DATA_ROOT, "chats"),
-	graph: path.join(DATA_ROOT, "graph"),
+	get chats() {
+		return path.join(dataRoot(), "chats");
+	},
+	get graph() {
+		return path.join(dataRoot(), "graph");
+	},
 	/** Debug artifacts (env-gated): data/debug/provider-events/<chatId>.jsonl
 	 * raw provider stream recordings (src/agent/provider-events.ts). */
-	debug: path.join(DATA_ROOT, "debug"),
-} as const;
+	get debug() {
+		return path.join(dataRoot(), "debug");
+	},
+};
 
 // ─── Models ────────────────────────────────────────────────────────────────
 // BYOK ALL THE WAY DOWN (owner, 2026-09-22): there are NO factory default
@@ -60,38 +77,46 @@ export type ModelRole =
  * TRUTH (owner, 2026-09-30): edges are a derived view, never stored.
  */
 export const LEDGER_FILES = {
-	nodes: path.join(PATHS.graph, "nodes.jsonl"),
-	chains: path.join(PATHS.graph, "chains.jsonl"),
-	sessions: path.join(PATHS.graph, "sessions.jsonl"),
+	get nodes() {
+		return path.join(PATHS.graph, "nodes.jsonl");
+	},
+	get chains() {
+		return path.join(PATHS.graph, "chains.jsonl");
+	},
+	get sessions() {
+		return path.join(PATHS.graph, "sessions.jsonl");
+	},
 	/** Per-message extraction coverage (contracts/graph.ts CoverageEntry;
 	 *  the checkpoint's replacement for chat extractions — notes keep
 	 *  sessions.jsonl, whole-file as they are). */
-	coverage: path.join(PATHS.graph, "coverage.jsonl"),
-} as const;
+	get coverage() {
+		return path.join(PATHS.graph, "coverage.jsonl");
+	},
+};
 
 /**
  * Notes-import bookkeeping (NOT a ledger): one JSON map, src-id → NotesSource
  * record (contracts/graph.ts) — the file path + import time + the run's usage
  * log. Read-modify-write like a chat file, not append-only like the ledgers.
  */
-export const SOURCES_FILE = path.join(PATHS.graph, "sources.json");
+export const sourcesFile = () => path.join(PATHS.graph, "sources.json");
 /** The layout ledger (read-modify-write like sources.json): nodeId →
  *  {x,y} resting positions from the incremental settle (core/layout.ts).
  *  Carries an updatedAt stamp for future live-physics conflict handling. */
-export const POSITIONS_FILE = path.join(PATHS.graph, "positions.json");
+export const positionsFile = () => path.join(PATHS.graph, "positions.json");
 
 /**
  * Graph render settings (the settings-panel controls): one small JSON blob,
  * read-modify-write. Shared shape/sanitizer: src/core/render-settings.ts.
  */
-export const RENDER_SETTINGS_FILE = path.join(PATHS.graph, "render-settings.json");
+export const renderSettingsFile = () => path.join(PATHS.graph, "render-settings.json");
 
 /** The graph-family FORMAT STAMP sidecar (schema-versioning wave,
  *  2026-10-10): one version for the whole family — the four JSONL ledgers,
  *  sources.json, render-settings.json. LAZY v1: absent = v1; the first
  *  graph-family write creates it. positions.json is REBUILDABLE and rides
  *  along unversioned by design (owner ruling). */
-export const GRAPH_FORMAT_FILE = path.join(PATHS.graph, "format.json");
+export const graphFormatFile = () => path.join(PATHS.graph, "format.json");
 
 /**
  * THE USER SETTINGS RECORD (settings-storage wave, 2026-09-19): one
@@ -109,7 +134,7 @@ export const GRAPH_FORMAT_FILE = path.join(PATHS.graph, "format.json");
  * with per-session models, owner 2026-09-28 — sessions own their model
  * from birth, stamped from the strong slot.)
  */
-export const SETTINGS_FILE = path.join(DATA_ROOT, "settings.json");
+export const settingsFile = () => path.join(dataRoot(), "settings.json");
 
 /**
  * User prompt-override files (settings-storage wave, 2026-09-19): the
@@ -124,7 +149,7 @@ export const SETTINGS_FILE = path.join(DATA_ROOT, "settings.json");
  * remove, or reorder fragments adapt automatically; an override keyed to
  * a vanished segment stops composing but stays on disk.
  */
-export const PROMPTS_OVERRIDE_DIR = path.join(DATA_ROOT, "prompts");
+export const promptsOverrideDir = () => path.join(dataRoot(), "prompts");
 
 /**
  * THE AUTH/KEY STORE (auth-keys wave, 2026-09-19): BYOK provider keys in a
@@ -140,6 +165,8 @@ export const PROMPTS_OVERRIDE_DIR = path.join(DATA_ROOT, "prompts");
  * re-read from disk on every API access. Secrets NEVER go in settings.json
  * — this file keeps that role, alongside .env.local.
  */
-export const AUTH_FILE = process.env.LH_AUTH_FILE
+const SINGLE_USER_AUTH_FILE = process.env.LH_AUTH_FILE
 	? path.resolve(process.env.LH_AUTH_FILE)
 	: path.join(ROOT, "auth.json");
+
+export const authFile = () => requireUser("auth file")?.authFile ?? SINGLE_USER_AUTH_FILE;

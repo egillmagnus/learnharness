@@ -20,6 +20,7 @@ import {
 	ProviderKeyMissingError,
 	type EmissionStats,
 } from "@/src/core";
+import { withUser } from "@/lib/with-user";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,7 @@ interface ImportResult {
 	slots?: string[];
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
 	const form = await request.formData();
 	const files = form.getAll("files").filter((f): f is File => f instanceof File);
 	if (files.length === 0) {
@@ -94,3 +95,6 @@ export async function POST(request: Request) {
 	await Promise.all(workers);
 	return Response.json({ results });
 }
+
+// Fork addition (2026-10-24): runs as the signed-in user (lib/with-user.ts).
+export const POST = withUser(handlePOST);

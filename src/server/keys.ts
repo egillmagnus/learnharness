@@ -52,6 +52,7 @@ import {
 	validateKeyShape,
 } from "../core/auth-keys.ts";
 import { authStore } from "../store/auth.ts";
+import { multiUser } from "../../user-context.ts";
 
 // The once-per-process boot record — globalThis anchor (HMR re-imports the
 // module; the snapshot must not re-run and misread fill-gapped vars as real
@@ -99,6 +100,18 @@ export function envKeysIgnored(): boolean {
  * resurrects (its file entry is gone too).
  */
 export function initAuthEnv(): void {
+	// MULTI-USER (fork addition, 2026-10-24 — user-context.ts): keys are
+	// per user, so nothing is reflected into the shared process env, and
+	// any provider key already there is removed — pi-ai falls back to
+	// process.env when a request carries no key, and that must never
+	// find one. Each model call passes its user's key explicitly
+	// (src/agent/models.ts).
+	if (multiUser()) {
+		for (const name of [...AUTH_KEYS.map((k) => k.id), ...AUTH_PROVIDER_KEYS.map((p) => p.envVar)]) {
+			delete process.env[name];
+		}
+		return;
+	}
 	const record = boot();
 	const fileVars = authStore.authVars();
 	const managed = new Set<string>([
@@ -178,6 +191,7 @@ export function resolveKeyStatuses(
 
 /** The GET view: every curated key (present or not) + unknown file vars. */
 export function keyStatuses(): AuthKeyStatus[] {
+	if (multiUser()) return resolveKeyStatuses(authStore.authVars(), {}, new Set(), AUTH_PROVIDER_ENV_VARS);
 	return resolveKeyStatuses(authStore.authVars(), process.env, boot().realEnv, AUTH_PROVIDER_ENV_VARS);
 }
 
@@ -189,7 +203,7 @@ export function keyValue(id: string): string | undefined {
 	// The fresh-user switch: ONLY the file store counts (belt-and-
 	// suspenders — the boot deletion already emptied the env; this guards
 	// any env key reintroduced after boot).
-	if (envKeysIgnored()) return authStore.authVars()[id];
+	if (envKeysIgnored() || multiUser()) return authStore.authVars()[id];
 	return process.env[id] ?? authStore.authVars()[id];
 }
 
@@ -216,7 +230,7 @@ export function saveKey(id: string, value: string): { ok: true; status: AuthKeyS
 	const trimmed = value.trim();
 	authStore.setAuthVar(id, trimmed);
 	const record = boot();
-	if (!record.realEnv.has(id)) {
+	if (!multiUser() && !record.realEnv.has(id)) {
 		process.env[id] = trimmed;
 		record.fillGap.add(id);
 	}

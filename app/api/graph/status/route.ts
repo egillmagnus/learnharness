@@ -8,10 +8,11 @@
  * a missing chat record still reports the run.
  */
 import { chatStore, extractionStatuses } from "@/src/server";
+import { withUser } from "@/lib/with-user";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+async function handleGET() {
 	const runs = extractionStatuses().map((run) => ({
 		// Unique row id (the registry job key: source id, or "src#i" for
 		// chunk jobs) — one source's rows share chatId, and React keys on
@@ -34,3 +35,6 @@ export async function GET() {
 	}));
 	return Response.json({ runs });
 }
+
+// Fork addition (2026-10-24): runs as the signed-in user (lib/with-user.ts).
+export const GET = withUser(handleGET);

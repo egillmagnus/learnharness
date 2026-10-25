@@ -13,11 +13,15 @@
  * (turn-runs + ui-stream) directly.
  */
 import { getChat, runningTurn, piTurnResponse, settledTurnResponse } from "@/src/server";
+import { withUser } from "@/lib/with-user";
 
-export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+async function handleGET(_req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
 	const { id } = await ctx.params;
 	if (!getChat(id)) return Response.json({ error: "Unknown chat" }, { status: 404 });
 	const handle = runningTurn(id);
 	if (!handle) return settledTurnResponse();
 	return piTurnResponse(handle);
 }
+
+// Fork addition (2026-10-24): runs as the signed-in user (lib/with-user.ts).
+export const GET = withUser(handleGET);

@@ -27,6 +27,7 @@
 
 import { ChatInputError, dismissAppends, emit } from "../core";
 import type { ChatStore } from "../core/ports.ts";
+import { userScopedKey } from "../core/user-scope.ts";
 
 /** The parked dismissal body — exactly the parsed input the dismiss route
  *  accepted ({type:"dismiss", toolCallId, answer} or
@@ -45,15 +46,15 @@ function registry(): Map<string, ParkedDismissal> {
 /** Park (or overwrite) the chat's dismissal intent. Called by the dismiss
  *  route when a turn owns the chat. */
 export function parkDismissal(chatId: string, input: ParkedDismissal): void {
-	registry().set(chatId, input);
+	registry().set(userScopedKey(chatId), input);
 }
 
 /** Take the chat's parked dismissal (removes it). Returns null when
  *  nothing is parked. */
 export function takeParkedDismissal(chatId: string): ParkedDismissal | null {
-	const parked = registry().get(chatId);
+	const parked = registry().get(userScopedKey(chatId));
 	if (parked === undefined) return null;
-	registry().delete(chatId);
+	registry().delete(userScopedKey(chatId));
 	return parked;
 }
 

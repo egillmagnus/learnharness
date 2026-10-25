@@ -31,6 +31,7 @@ import { batchRuns, coverageOf, messageViewLines } from "../../core/coverage.ts"
 import type { LhMessage } from "../../core/native-messages.ts";
 import { auditorGraphTools } from "../tools/graph.ts";
 import { runSubmitAgent, healStringifiedArrays } from "./submit-agent.ts";
+import { isOwnScopedKey, userScopedKey } from "../../core/user-scope.ts";
 
 /**
  * The extraction pipeline (vision §1 construction, 2026-09-02 redesign;
@@ -681,7 +682,10 @@ function runs(): NonNullable<LhExtractionGlobal["__lhExtractionRuns"]> {
 
 /** In-flight pipeline runs (oldest first) — the /api/graph/status payload. */
 export function extractionStatuses(): RunningExtraction[] {
-	return [...runs().running.values()].sort((a, b) => a.startedAt - b.startedAt);
+	return [...runs().running.entries()]
+		.filter(([key]) => isOwnScopedKey(key))
+		.map(([, run]) => run)
+		.sort((a, b) => a.startedAt - b.startedAt);
 }
 
 /** True cancellation of the in-flight run for a chat (the dock's abort
@@ -694,8 +698,8 @@ export function abortExtraction(chatId: string): boolean {
 	// entries (one per chunk/batch) — aborting the source aborts EVERY
 	// job of its fan-out.
 	let found = false;
-	for (const run of runs().running.values()) {
-		if (run.chatId !== chatId) continue;
+	for (const [key, run] of runs().running.entries()) {
+		if (run.chatId !== chatId || !isOwnScopedKey(key)) continue;
 		run.controller.abort();
 		found = true;
 	}
@@ -832,9 +836,9 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		part?: { i: number; n: number },
 	): void {
 		const R = runs();
-		const prev = runningExtractions.get(jobKey);
+		const prev = runningExtractions.get(userScopedKey(jobKey));
 		if (!prev) R.lastStartedAt = Math.max(Date.now(), R.lastStartedAt + 1);
-		runningExtractions.set(jobKey, {
+		runningExtractions.set(userScopedKey(jobKey), {
 			chatId: prev?.chatId ?? jobKey.split("#")[0]!,
 			part: prev?.part ?? part, // phase changes never lose the part
 			kind,
@@ -853,13 +857,13 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	 *  leaves the feed. ONE seam for all delete sites so no exit path can
 	 *  miss the announce (push S5, 2026-10-02). */
 	function finishExtraction(jobKey: string): void {
-		runningExtractions.delete(jobKey);
+		runningExtractions.delete(userScopedKey(jobKey));
 		emit("activity-changed", {});
 	}
 
 	/** Accumulate one billed step into the run's registry entry (live). */
 	function recordStep(jobKey: string, stage: "extractor" | "auditor", usage: CallUsage, model: string): void {
-		const run = runningExtractions.get(jobKey);
+		const run = runningExtractions.get(userScopedKey(jobKey));
 		if (!run) return; // not running (tests driving stages directly)
 		run.usage[stage] ??= { model, steps: [] };
 		run.usage[stage]!.steps.push(usage);
@@ -883,7 +887,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		const prev = lock.tail;
 		let release!: () => void;
 		lock.tail = new Promise<void>((resolve) => (release = resolve));
-		const signal = runningExtractions.get(jobKey)?.controller.signal;
+		const signal = runningExtractions.get(userScopedKey(jobKey))?.controller.signal;
 		let onAbort: (() => void) | undefined;
 		const aborted = new Promise<never>((_, reject) => {
 			if (!signal) return;
@@ -911,7 +915,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		view: string,
 		batchIds: ReadonlySet<string>,
 	): Promise<SessionFindings> {
-		const signal = runningExtractions.get(jobKey)?.controller.signal;
+		const signal = runningExtractions.get(userScopedKey(jobKey))?.controller.signal;
 		signal?.throwIfAborted(); // an abort during a sync gap ends the job here
 		// THE DIGEST (owner, 2026-09-30 evening): the extractor continues a
 		// partly-extracted source — it sees everything this source has
@@ -945,7 +949,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	}
 
 	async function audit(jobKey: string, sourceId: string, findings: SessionFindings): Promise<AuditVerdicts> {
-		const signal = runningExtractions.get(jobKey)?.controller.signal;
+		const signal = runningExtractions.get(userScopedKey(jobKey))?.controller.signal;
 		signal?.throwIfAborted(); // an abort during the extract→audit gap ends here
 		const graph = getGraph(graphStore);
 		console.info(
@@ -1000,7 +1004,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	 *  handoff). The audit side needs no slot: audits already serialize
 	 *  behind their own global lock. */
 	async function withExtractSlot<T>(jobKey: string, critical: () => Promise<T>): Promise<T> {
-		const signal = runningExtractions.get(jobKey)?.controller.signal;
+		const signal = runningExtractions.get(userScopedKey(jobKey))?.controller.signal;
 		return withBgLlmSlot(signal, critical);
 	}
 
@@ -1009,7 +1013,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	 *  exactly what the record should show (stats absent = never merged).
 	 *  Idempotent per startedAt (the store dedupes). */
 	function persistRunUsage(jobKey: string, durationMs: number, stats: EmissionStats | undefined): void {
-		const run = runningExtractions.get(jobKey);
+		const run = runningExtractions.get(userScopedKey(jobKey));
 		if (!run) return; // not running (tests driving stages directly)
 		// PER-CHUNK JOBS (owner, 2026-09-28): the registry KEY may carry a
 		// "#i" suffix — the usage LEDGERS key by SOURCE (run.chatId): one
@@ -1093,8 +1097,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	}
 
 	async function runExtraction(chatId: string): Promise<EmissionStats> {
-		if (inFlight.has(chatId)) return { nodes: 0, chains: 0 };
-		inFlight.add(chatId);
+		if (inFlight.has(userScopedKey(chatId))) return { nodes: 0, chains: 0 };
+		inFlight.add(userScopedKey(chatId));
 		const t0 = performance.now();
 		// COVERAGE (vision-extraction-coverage.md, 2026-09-15): extract ONLY
 		// what the per-chat coverage ledger doesn't already hold — never the
@@ -1223,7 +1227,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			console.error(`[extraction ${chatId}] pipeline failed (${Math.round(performance.now() - t0)}ms):`, err);
 			throw err;
 		} finally {
-			inFlight.delete(chatId);
+			inFlight.delete(userScopedKey(chatId));
 			finishExtraction(chatId); // done or failed — no longer running
 		}
 	}
@@ -1266,7 +1270,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		// jobKey (per-chunk jobs, owner 2026-09-28): the registry key —
 		// "src#i" for chunk jobs — so the abort signal reaches the call.
 		// input.id stays the SOURCE id for the view and store ledgers.
-		const signal = runningExtractions.get(jobKey)?.controller.signal;
+		const signal = runningExtractions.get(userScopedKey(jobKey))?.controller.signal;
 		signal?.throwIfAborted(); // an abort during a sync gap ends the job here
 		const view = notesView(input);
 		// Same digest law as the chat door (owner, 2026-09-30 evening): the
@@ -1335,7 +1339,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 						status: "fulfilled",
 						value: await runJob({ id, kind: "notes", label: input.filePath, part }, async (jobKey) => {
 							setPhase(jobKey, "queued", "notes", input.filePath, part);
-							chunkSignal = runningExtractions.get(jobKey)?.controller.signal;
+							chunkSignal = runningExtractions.get(userScopedKey(jobKey))?.controller.signal;
 							const findings = await withExtractSlot(jobKey, async () => {
 								setPhase(jobKey, "extracting", "notes", input.filePath, part);
 								return notesExtract(jobKey, { ...input, text: chunk, part });
@@ -1414,8 +1418,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	async function importNotes(input: NotesImportInput): Promise<EmissionStats> {
 		const id = `src_${crypto.createHash("sha256").update(input.filePath).digest("hex").slice(0, 12)}`;
 		// Acquire BEFORE source upsert: overlapping contents must not alter metadata.
-		if (inFlight.has(id)) throw new NotesImportError("busy", { nodes: 0, chains: 0 }, "This file is already being imported. Try again when it finishes.");
-		inFlight.add(id);
+		if (inFlight.has(userScopedKey(id))) throw new NotesImportError("busy", { nodes: 0, chains: 0 }, "This file is already being imported. Try again when it finishes.");
+		inFlight.add(userScopedKey(id));
 		try {
 			const importedAt = new Date().toISOString();
 			graphStore.upsertSource({ id, filePath: input.filePath, importedAt });
@@ -1424,7 +1428,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			if (err instanceof NotesImportError || err instanceof ModelsNotConfiguredError || err instanceof ProviderKeyMissingError) throw err;
 			throw new NotesImportError("failed", { nodes: 0, chains: 0 }, err instanceof Error ? err.message : String(err), { cause: err });
 		} finally {
-			inFlight.delete(id);
+			inFlight.delete(userScopedKey(id));
 		}
 	}
 

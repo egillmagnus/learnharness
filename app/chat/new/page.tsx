@@ -1,6 +1,7 @@
 import { NewSession } from "@/components/new-session";
 import { readSettingsRecord } from "@/src/server";
 import { slotsConfigured } from "@/src/core";
+import { asPageUser } from "@/lib/with-user";
 
 export const dynamic = "force-dynamic";
 
@@ -21,9 +22,10 @@ export default async function NewSessionPage({
 	searchParams: Promise<{ mode?: string }>;
 }) {
 	const { mode } = await searchParams;
+	const record = await asPageUser(() => readSettingsRecord());
 	return (
 		<NewSession
-			initialConfigured={slotsConfigured(readSettingsRecord()?.models)}
+			initialConfigured={slotsConfigured(record?.models)}
 			mode={mode === "practice" ? "practice" : "teach"}
 		/>
 	);

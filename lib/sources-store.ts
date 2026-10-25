@@ -3,7 +3,8 @@
  * learner fills from the Sources page — LH_SOURCES_DIR/<course>/<files>.
  * The agent's file tools read the same folder (it sits inside
  * LH_FILES_ROOT), so "teach me chapter 2 of <course>" just works.
- * Off unless LH_SOURCES_DIR is set.
+ * Off unless LH_SOURCES_DIR is set, or multi-user (each user's
+ * sourcesDir — user-context.ts).
  *
  * Every name that reaches the filesystem goes through courseName() or
  * fileName(), and every resolved path is checked (symlinks followed) to
@@ -12,6 +13,7 @@
 import { realpathSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { requireUser } from "@/user-context";
 
 export const MAX_FILE_BYTES = 50 * 1024 * 1024; // matches the proxy's client_max_body_size
 
@@ -37,7 +39,7 @@ export class SourcesError extends Error {
 }
 
 export function sourcesRoot(): string | undefined {
-	return process.env.LH_SOURCES_DIR || undefined;
+	return requireUser("sources dir")?.sourcesDir ?? (process.env.LH_SOURCES_DIR || undefined);
 }
 
 function requireRoot(): string {

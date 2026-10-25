@@ -2,6 +2,7 @@ import { realpathSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { requireUser } from "../../../user-context.ts";
 
 /**
  * Shared plumbing for the learner-filesystem tools (ls / find / grep) —
@@ -44,8 +45,12 @@ const EXCLUDED_DIR_NAMES = new Set(["node_modules", ".git", "Library", ".Trash"]
  *  resolve (symlinks followed) inside that root, or the call throws and
  *  the model sees the error. */
 export function resolveSourcePath(p?: string): string {
-	const resolved = !p ? os.homedir() : path.isAbsolute(p) ? p : path.join(os.homedir(), p);
-	const root = process.env.LH_FILES_ROOT;
+	// Multi-user (fork addition, 2026-10-24): the user's filesRoot is both
+	// their "home" and their fence (user-context.ts).
+	const user = requireUser("files root");
+	const home = user?.filesRoot ?? os.homedir();
+	const resolved = !p ? home : path.isAbsolute(p) ? p : path.join(home, p);
+	const root = user?.filesRoot ?? process.env.LH_FILES_ROOT;
 	if (root && !isInside(realOrResolved(root), realOrResolved(resolved))) {
 		throw new Error(`Access denied: ${p ?? "~"} is outside the learner's files (${root}).`);
 	}
