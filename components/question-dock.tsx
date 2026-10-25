@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
+import { ArrowDownIcon, ChevronDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
@@ -70,6 +70,8 @@ export interface QuestionDockProps {
 	 */
 	reveal?: boolean;
 	onExpand: () => void;
+	/** Fold the open dock to its bar by hand (phones — see chat.tsx collapseByHand). */
+	onCollapse?: () => void;
 	onSubmit: (output: QuestionAnswerData) => void;
 	/** Escape in a question field stops dictation (STT wave) — threaded
 	 *  from the page that owns the dictation hook. */
@@ -99,6 +101,7 @@ export function QuestionDock({
 	expanded,
 	reveal = false,
 	onExpand,
+	onCollapse,
 	onSubmit,
 	onEscape,
 	phase = "probe",
@@ -147,7 +150,19 @@ export function QuestionDock({
 					}
 				/>
 			)}
-			<div className={expanded ? "dock-variant" : "invisible h-0 overflow-hidden"}>
+			<div className={expanded ? "dock-variant relative" : "invisible h-0 overflow-hidden"}>
+				{expanded && onCollapse && (
+				// Phones (fork addition, 2026-10-25): the open dock covers the
+				// transcript — this folds it to the bar so the lesson can be read.
+				<button
+					type="button"
+					onClick={onCollapse}
+					aria-label="Hide question"
+					className="absolute right-2 top-2 z-10 flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
+				>
+					<ChevronDownIcon className="size-4" />
+				</button>
+			)}
 				<QuestionDockForm
 					toolName={toolName}
 					toolCallId={toolCallId}

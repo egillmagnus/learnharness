@@ -1943,6 +1943,27 @@ function DockOverlay({
 	// again → re-open. The dead band keeps trackpad drift from chattering.
 	const expandedRef = useRef(expanded);
 	expandedRef.current = expanded;
+	// HIDE BY HAND (fork addition, 2026-10-25): on a phone the open dock
+	// covers the transcript, so there is nothing to scroll and the
+	// scroll-fold never fires — the dock's hide button folds it instead.
+	// The hold keeps the at-bottom auto-expand from reopening it at once;
+	// it lifts when the learner scrolls away (or reopens via the bar).
+	const holdFoldRef = useRef(false);
+	const collapseByHand = useCallback(() => {
+		holdFoldRef.current = true;
+		const before = blockRef.current?.getBoundingClientRect().height ?? 0;
+		setExpanded(false);
+		// The transcript keeps the open dock's reserve, so the fold alone
+		// leaves an empty band above the bar: scroll up by what the fold
+		// freed (after its ~180ms morph) so the lesson's last lines show.
+		setTimeout(() => {
+			const after = blockRef.current?.getBoundingClientRect().height ?? before;
+			if (before > after) scrollRef.current?.scrollBy({ top: after - before, behavior: "smooth" });
+		}, 250);
+	}, [scrollRef]);
+	useEffect(() => {
+		if (expanded) holdFoldRef.current = false;
+	}, [expanded]);
 	// Dock ownership (the fold machine, the reserve immunity, the arrival
 	// states): a pending question OR an active practice problem — either
 	// replaces the composer and owns the band.
@@ -2171,6 +2192,8 @@ function DockOverlay({
 				// needs the distance AND stick-to-bottom agreeing the learner
 				// left the bottom.
 				if (d > COLLAPSE_DIST && !expandIntentRef.current && !atBottomRef.current) setExpanded(false);
+			} else if (holdFoldRef.current) {
+				if (d > COLLAPSE_DIST) holdFoldRef.current = false;
 			} else if (d < EXPAND_DIST) {
 				// Teach checks stay collapsed until the learner opens them (W5): the
 				// at-bottom auto-expand would pop the form over the teaching.
@@ -2299,6 +2322,7 @@ function DockOverlay({
 									reveal={revealPending}
 									phase={phase}
 									onExpand={expandAndReveal}
+									onCollapse={collapseByHand}
 									onSubmit={onSubmitAnswer}
 									onEscape={dictationCancel}
 									dictationClaim={!revealPending}
@@ -2313,6 +2337,7 @@ function DockOverlay({
 										setExpanded(true);
 										void suppressFoldDuringReveal();
 									}}
+									onCollapse={collapseByHand}
 									onSubmit={onSubmitThinking}
 									onEscape={dictationCancel}
 									compactionRunning={compactionRunning}

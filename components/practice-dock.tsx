@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { ChevronRightIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
@@ -38,6 +38,8 @@ export interface PracticeDockProps {
 	/** Collapse state, owned by the DockOverlay. */
 	expanded: boolean;
 	onExpand: () => void;
+	/** Fold the open dock to its bar by hand (phones — see chat.tsx collapseByHand). */
+	onCollapse?: () => void;
 	/** text — POST {type:"thinking"} (one lane; the register is read from the text). */
 	onSubmit: (text: string) => void;
 	/** Escape in the thinking field stops dictation (threaded from the page). */
@@ -49,7 +51,7 @@ export interface PracticeDockProps {
 	compactionRunning?: boolean;
 }
 
-export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmit, onEscape, compactionRunning = false }: PracticeDockProps) {
+export function PracticeDock({ problemCallId, input, expanded, onExpand, onCollapse, onSubmit, onEscape, compactionRunning = false }: PracticeDockProps) {
 	const [thinking, setThinking] = useState("");
 	// Ref MIRRORS the field ("nothing gets lost", the question-dock
 	// discipline): a submit resuming after `await finishDictation()` reads
@@ -101,7 +103,19 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 
 	/* ── the expanded form ── */
 	return (
-		<div data-testid="practice-dock" data-problem={problemCallId}>
+		<div data-testid="practice-dock" data-problem={problemCallId} className="relative">
+			{onCollapse && (
+				// Phones (fork addition, 2026-10-25): the open dock covers the
+				// transcript — this folds it to the bar so the lesson can be read.
+				<button
+					type="button"
+					onClick={onCollapse}
+					aria-label="Hide problem"
+					className="absolute right-2 top-2 z-10 flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
+				>
+					<ChevronDownIcon className="size-4" />
+				</button>
+			)}
 			{/* The agent's half: the 'Problem' eyebrow (mirroring the quiz
 			    cards' label row — owner round, 2026-10-05) + the statement,
 			    markdown + LaTeX rendered, capped by the measured column
