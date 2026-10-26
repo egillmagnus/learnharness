@@ -37,7 +37,7 @@ export interface QuizOption {
  *  Neutral elaboration belongs in the question text or the post-answer
  *  explanation; the option is a bare claim. */
 const quizOptionProps = {
-	label: Type.String({ description: "Display label for the answer option — a bare claim, no reasoning" }),
+	label: Type.String({ description: "Display label for the answer option — a bare claim, no reasoning; same length and level of detail as the other options (the correct one is never the longest or most specific)" }),
 	value: Type.Optional(
 		Type.String({
 			description: "Optional machine-readable value returned for the option. Defaults to the label.",
@@ -49,6 +49,7 @@ const quizOptionProps = {
  *  collection, there is no correctness to leak. */
 const askOptionProps = {
 	...quizOptionProps,
+	label: Type.String({ description: "Display label for the answer option" }),
 	description: Type.Optional(
 		Type.String({ description: "Optional extra detail shown below the option" }),
 	),
