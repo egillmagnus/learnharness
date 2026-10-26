@@ -95,7 +95,13 @@ export function SessionMessageNavigation() {
 		const onHash = () => {
 			lastJump.current = null;
 			clearFlash();
-			jump();
+			// An anchor above the transcript window renders a frame later
+			// (Chat widens the window on the same hashchange).
+			let frames = 0;
+			const attempt = () => {
+				if (!jump() && ++frames < 30) window.requestAnimationFrame(attempt);
+			};
+			attempt();
 		};
 		window.addEventListener("hashchange", onHash);
 		window.addEventListener("popstate", onHash);

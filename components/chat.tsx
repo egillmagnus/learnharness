@@ -34,8 +34,13 @@ import { StatsBar } from "@/components/stats-bar";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import {
 	isProviderKeyRefusal,
+	earlierTranscriptStart,
 	firstSourceTextParts,
 	messageAnchorId,
+	messageIdFromHash,
+	transcriptAnchorStart,
+	transcriptStartBefore,
+	type TranscriptStart,
 	textPartMessageId,
 	kbdEventForAction as kbdEventForChat,
 	needsContinuation,
@@ -181,6 +186,36 @@ function SystemLine({ children, testId }: { children: React.ReactNode; testId?: 
 	);
 }
 
+/** The transcript window's top edge: once the reader scrolls within
+ * ~1500px of it, the next page of earlier parts renders. Keyed by the
+ * window start, so every widening re-observes (an observer reports only
+ * changes, and a short page can leave the edge in view). */
+function EarlierSentinel({ onReach }: { onReach: () => void }) {
+	const { scrollRef } = useStickToBottomContext();
+	const ref = useRef<HTMLDivElement>(null);
+	const reach = useRef(onReach);
+	reach.current = onReach;
+	useEffect(() => {
+		const root = scrollRef.current;
+		const el = ref.current;
+		if (!root || !el) return;
+		let io: IntersectionObserver | undefined;
+		// Wait out the initial jump to the bottom: before it lands,
+		// scrollTop is 0 and the edge would read as reached.
+		const timer = window.setTimeout(() => {
+			io = new IntersectionObserver((entries) => {
+				if (entries.some((e) => e.isIntersecting)) reach.current();
+			}, { root, rootMargin: "1500px 0px 0px 0px" });
+			io.observe(el);
+		}, 300);
+		return () => {
+			window.clearTimeout(timer);
+			io?.disconnect();
+		};
+	}, [scrollRef]);
+	return <div ref={ref} aria-hidden="true" data-transcript-edge="" className="-mb-4 h-px w-full shrink-0" />;
+}
+
 function isSubagentSteer(m: LhViewMessage): boolean {
 	return (m.metadata as { subagentResult?: unknown } | undefined)?.subagentResult != null;
 }
@@ -242,6 +277,53 @@ export function Chat({
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
 	const scrollContextRef = useRef<StickToBottomContext | null>(null);
 	const sourceTextParts = useMemo(() => firstSourceTextParts(messages), [messages]);
+
+	// THE TRANSCRIPT WINDOW (owner, 2026-10-26): a long session renders its
+	// tail and grows upward as the reader nears the top (EarlierSentinel).
+	// A message link (#message-…) or Find widens it to what they need. Each
+	// widening keeps the reader's place: the first transcript row in view is
+	// the anchor, and the layout effect shifts scrollTop by how far its
+	// bottom edge moved (new parts render above it or inside it, never
+	// below it — the bottom is the edge that stays put on the page).
+	const [windowStart, setWindowStart] = useState<TranscriptStart>(() => earlierTranscriptStart(messages));
+	const shownFrom = windowStart.message <= messages.length ? windowStart : earlierTranscriptStart(messages);
+	const messagesRef = useRef(messages);
+	messagesRef.current = messages;
+	const shownFromRef = useRef(shownFrom);
+	shownFromRef.current = shownFrom;
+	const revealPlace = useRef<{ row: Element; bottom: number } | null>(null);
+	const revealFrom = useCallback((to: TranscriptStart) => {
+		if (!transcriptStartBefore(to, shownFromRef.current)) return;
+		const el = scrollContextRef.current?.scrollRef.current;
+		const viewTop = el?.getBoundingClientRect().top ?? 0;
+		const rows = el?.querySelector("[data-session-find-root]")?.children ?? [];
+		const row = Array.from(rows).find((r) => !r.hasAttribute("data-transcript-edge") && r.getBoundingClientRect().bottom > viewTop);
+		revealPlace.current = row ? { row, bottom: row.getBoundingClientRect().bottom } : null;
+		setWindowStart(to);
+	}, []);
+	useLayoutEffect(() => {
+		const place = revealPlace.current;
+		revealPlace.current = null;
+		const el = scrollContextRef.current?.scrollRef.current;
+		if (place && el && place.row.isConnected) el.scrollTop += place.row.getBoundingClientRect().bottom - place.bottom;
+	}, [windowStart]);
+	useEffect(() => {
+		const revealAnchor = () => {
+			const id = messageIdFromHash(window.location.hash);
+			const at = id ? transcriptAnchorStart(messagesRef.current, id) : null;
+			if (at) revealFrom(at);
+		};
+		const revealAll = () => revealFrom({ message: 0, part: 0 });
+		revealAnchor();
+		window.addEventListener("hashchange", revealAnchor);
+		window.addEventListener("popstate", revealAnchor);
+		window.addEventListener(kbdEventForChat("find"), revealAll);
+		return () => {
+			window.removeEventListener("hashchange", revealAnchor);
+			window.removeEventListener("popstate", revealAnchor);
+			window.removeEventListener(kbdEventForChat("find"), revealAll);
+		};
+	}, [revealFrom]);
 
 	// The reattach settled terminal → the sync-and-continue seam (below).
 	setReattachSettled(() => reattachSettledRef.current());
@@ -1322,9 +1404,15 @@ export function Chat({
 									description="The teacher will open by probing what you already know."
 								/>
 							)}
+							{(shownFrom.message > 0 || shownFrom.part > 0) && (
+								<EarlierSentinel
+									key={`${shownFrom.message}:${shownFrom.part}`}
+									onReach={() => revealFrom(earlierTranscriptStart(messagesRef.current, shownFromRef.current))}
+								/>
+							)}
 
 							{messages.map((m, mi) =>
-								m.role === "user" && isSubagentSteer(m) ? (
+								mi < shownFrom.message ? null : m.role === "user" && isSubagentSteer(m) ? (
 									// Sub-agent delivery (wake-pipeline steer): NO message bubble — the
 									// artifact card sits in the transcript column directly, full width
 									// and centered like the teacher's artifacts (contracts.ts "THE ASYNC
@@ -1402,7 +1490,8 @@ export function Chat({
 									mi > 0 &&
 									phases[mi] === "teach" &&
 									phases[mi - 1] !== "teach" &&
-									teachStepIndex(m.parts) === -1 ? (
+									teachStepIndex(m.parts) === -1 &&
+									!(mi === shownFrom.message && shownFrom.part > 0) ? (
 										<PhaseDivider key={`teach-${m.id || `m-${mi}`}`} phase="teach" />
 									) : null}
 									{m.role === "user" ? (
@@ -1438,6 +1527,7 @@ export function Chat({
 									<Message from="assistant" className="max-w-full">
 									<MessageContent className="w-full">
 											{m.parts.map((part, pi) => {
+												if (mi === shownFrom.message && pi < shownFrom.part) return null;
 												const isLastPart = mi === messages.length - 1 && pi === m.parts.length - 1;
 												// The step boundary where teaching begins (round 8): when
 												// the teach flip happens in a LATER step, its PhaseDivider
