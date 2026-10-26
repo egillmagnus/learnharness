@@ -182,9 +182,11 @@ export function StatsBar({
 			)}
 			{/* The middle slot: dictation (owner, 2026-09-17). flex-1 lets the
 			    meter expand into the row's free width; justify-center keeps the
-			    lone idle mic button visually centered. */}
+			    lone idle mic button visually centered. The slot is a size
+			    container: on a phone the idle label drops to the bare mic
+			    (owner, 2026-10-26 — "Di…" was all that fit). */}
 			{dictationSlot && (
-				<div className="flex min-w-0 flex-1 items-center justify-center">{dictationSlot}</div>
+				<div className="@container flex min-w-0 flex-1 items-center justify-center">{dictationSlot}</div>
 			)}
 			{/* The model + thinking control — one controller for the conversation
 			    agents (prober/teacher); the record's `turns` above still folds
