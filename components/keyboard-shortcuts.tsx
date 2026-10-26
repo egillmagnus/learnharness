@@ -113,6 +113,12 @@ export function KeyboardShortcuts() {
 			// pass through so the field keeps them. Tab already returned above.
 			if (isTypingSurface(e) && !(e.metaKey || e.ctrlKey || e.altKey)) return;
 
+			// In a plain browser (the fork serves the app on the web) a claimed
+			// mod combo must not also run the browser's own action — Ctrl+D
+			// bookmarked the page while starting dictation. Ctrl+N/T stay the
+			// browser's: Chrome never hands those to a page.
+			if (e.metaKey || e.ctrlKey || e.altKey) e.preventDefault();
+
 			// Dispatch: global commands we own run here; surface commands
 			// ride the window event for the mounted surface to catch.
 			switch (action) {
