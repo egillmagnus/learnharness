@@ -67,6 +67,38 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 	});
 }
 
+/** A connection the browser dropped (fetch's network TypeError: Safari
+ *  "Load failed", Chrome "network error"/"Failed to fetch", Firefox
+ *  "NetworkError…") — iOS kills a backgrounded PWA's sockets this way. */
+export function isNetworkDrop(err: unknown): boolean {
+	return (
+		err instanceof TypeError &&
+		/load failed|failed to fetch|network ?error|network connection was lost|terminated/i.test(err.message)
+	);
+}
+
+/** Resolves once the page is in the foreground (a suspended page's
+ *  requests fail again until it is). */
+function untilVisible(signal: AbortSignal): Promise<void> {
+	if (typeof document === "undefined" || document.visibilityState === "visible") return Promise.resolve();
+	return new Promise((resolve, reject) => {
+		const done = () => {
+			if (document.visibilityState !== "visible") return;
+			document.removeEventListener("visibilitychange", done);
+			resolve();
+		};
+		document.addEventListener("visibilitychange", done);
+		signal.addEventListener(
+			"abort",
+			() => {
+				document.removeEventListener("visibilitychange", done);
+				reject(new DOMException("Aborted", "AbortError"));
+			},
+			{ once: true },
+		);
+	});
+}
+
 async function turnInFlight(model: SessionModel): Promise<boolean | null> {
 	try {
 		const res = await model.fetch(`/api/jobs?chatId=${encodeURIComponent(model.chatId)}`);
@@ -227,6 +259,8 @@ export class SessionModel {
 	// The single live consume (POST response or reattach stream): a newer
 	// consume cancels the older — one reader at a time.
 	private consumeAbort: AbortController | null = null;
+	/** Reconnects since the last stream that delivered an event. */
+	private dropRetries = 0;
 	/** Synchronous ready check for the gate (send/read mount logic). */
 	readyRef = true;
 
@@ -442,6 +476,7 @@ export class SessionModel {
 				const acted = this.applyWireEvent(event);
 				if (!sawEvent && acted) {
 					sawEvent = true;
+					this.dropRetries = 0;
 					if (this.statusValue !== "error") this.setStatus("streaming");
 				}
 			}
@@ -521,9 +556,40 @@ export class SessionModel {
 			await this.consumeStream(res);
 		} catch (err) {
 			if ((err as Error).name === "AbortError") return; // a newer consume won
+			if (isNetworkDrop(err) && this.dropRetries < 5) {
+				await this.reconnectAfterDrop(controller.signal).catch(() => {});
+				return;
+			}
 			this.setError((err as Error).message);
 			this.setStatus("error");
 		}
+	}
+
+	/**
+	 * THE DROPPED STREAM (owner, 2026-10-26): closing the app mid-turn
+	 * suspends it, and iOS kills the stream's socket — the turn runs on
+	 * server-side regardless. Once the page is back in the foreground, ask
+	 * the server: still running → reattach (record refetch + replay); done
+	 * → the settle hook adopts the record. Only a server that stays
+	 * unreachable surfaces the error.
+	 */
+	private async reconnectAfterDrop(signal: AbortSignal): Promise<void> {
+		this.dropRetries++;
+		this.setStatus("submitted");
+		await untilVisible(signal);
+		for (let attempt = 1; attempt <= 6; attempt++) {
+			const running = await turnInFlight(this);
+			if (signal.aborted) return;
+			if (running === true) return this.resumeStream(true);
+			if (running === false) {
+				this.setStatus("ready");
+				this.onReattachSettled?.();
+				return;
+			}
+			await delay(this.pollMs * 2 * attempt, signal);
+		}
+		this.setError("Lost the connection to the server.");
+		this.setStatus("error");
 	}
 
 	/**

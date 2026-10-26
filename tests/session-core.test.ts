@@ -774,6 +774,75 @@ describe("resumeStream (the reattach path)", () => {
 		assert.equal(state.status, "error");
 		assert.match(state.error!.message, /boom/);
 	});
+
+	// THE DROPPED STREAM (owner, 2026-10-26): iOS kills a backgrounded
+	// PWA's socket mid-turn; the read rejects with "Load failed".
+	function droppedStream(...events: unknown[]): Response {
+		const bytes = new TextEncoder().encode(sse(...events));
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(bytes);
+				controller.error(new TypeError("Load failed"));
+			},
+		});
+		return new Response(body, { status: 200 });
+	}
+	const started = { type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "half" }] } };
+
+	it("a dropped stream reattaches to the turn still running", async () => {
+		let streams = 0;
+		globalThis.fetch = (async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url === "/api/chats/chat_x") return Response.json({ messages: [] });
+			if (url.startsWith("/api/jobs")) return Response.json({ turnInFlight: true });
+			if (url === "/api/chats/chat_x/stream") {
+				if (++streams === 1) return droppedStream(started);
+				return sseResponse(
+					started,
+					{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "whole" }], stopReason: "stop" } },
+					"[DONE]",
+				);
+			}
+			throw new Error(`unexpected fetch: ${url}`);
+		}) as typeof globalThis.fetch;
+		const m = model({ pollMs: 1 });
+		await m.resumeStream();
+		const state = m.getState();
+		assert.equal(streams, 2);
+		assert.equal(state.error, null);
+		assert.equal(state.status, "ready");
+		assert.equal(state.messages.at(-1)!.parts.at(-1)!.text, "whole");
+	});
+
+	it("a dropped stream whose turn finished meanwhile adopts the record", async () => {
+		let settled = 0;
+		globalThis.fetch = (async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url === "/api/chats/chat_x") return Response.json({ messages: [] });
+			if (url.startsWith("/api/jobs")) return Response.json({ turnInFlight: false });
+			if (url === "/api/chats/chat_x/stream") return droppedStream(started);
+			throw new Error(`unexpected fetch: ${url}`);
+		}) as typeof globalThis.fetch;
+		const m = model({ pollMs: 1, onReattachSettled: () => settled++ });
+		await m.resumeStream();
+		assert.equal(settled, 1);
+		assert.equal(m.getState().error, null);
+		assert.equal(m.getState().status, "ready");
+	});
+
+	it("a server that stays unreachable surfaces the error", async () => {
+		globalThis.fetch = (async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url === "/api/chats/chat_x") return Response.json({ messages: [] });
+			if (url.startsWith("/api/jobs")) throw new TypeError("Load failed");
+			if (url === "/api/chats/chat_x/stream") return droppedStream(started);
+			throw new Error(`unexpected fetch: ${url}`);
+		}) as typeof globalThis.fetch;
+		const m = model({ pollMs: 1 });
+		await m.resumeStream();
+		assert.equal(m.getState().status, "error");
+		assert.match(m.getState().error!.message, /Lost the connection/);
+	});
 });
 
 // ─── adoption (append-only ground rules, owner 2026-09-15) ──────────────────
