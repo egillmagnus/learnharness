@@ -20,7 +20,7 @@ fs.writeFileSync(
 	JSON.stringify({
 		users: [
 			{ id: "ann", passwordHash: "", home: home("ann") },
-			{ id: "bob", passwordHash: "", home: home("bob") },
+			{ id: "bob", passwordHash: "", home: home("bob"), authFile: path.join(home("bob"), "auth.json") },
 		],
 	}),
 );
@@ -37,7 +37,7 @@ const { emit, subscribe } = await import("../src/core/events.ts");
 const { registerTurn, runningTurn } = await import("../src/server/turn-runs.ts");
 const { issueToken, tokenUser } = await import("../lib/login-gate.ts");
 const { listCourses, createCourse } = await import("../lib/sources-store.ts");
-const { resolveSourcePath } = await import("../src/agent/tools/fs-shared.ts");
+const { resolveSourcePath, walkFiles } = await import("../src/agent/tools/fs-shared.ts");
 const { openRouterApiKey } = await import("../src/agent/models.ts");
 
 after(() => {
@@ -96,6 +96,19 @@ describe("multi-user isolation", () => {
 		assert.deepEqual((await runAsUser(bob, () => listCourses())).map((c) => c.name), []);
 		assert.equal(runAsUser(ann, () => resolveSourcePath("notes")), path.join(home("ann"), "notes"));
 		assert.throws(() => runAsUser(bob, () => resolveSourcePath(path.join(home("ann"), "notes"))), /Access denied/);
+	});
+
+	it("keeps API key files out of the agent's reach", async () => {
+		const ann = findUser("ann")!;
+		const bob = findUser("bob")!;
+		assert.equal(ann.authFile, path.join(TMP, "keys", "ann.json"), "keys default beside the users file, not under home");
+		// A key file configured inside the root is still refused and never walked.
+		fs.writeFileSync(bob.authFile, "{}");
+		fs.writeFileSync(path.join(home("bob"), "notes.md"), "notes");
+		assert.throws(() => runAsUser(bob, () => resolveSourcePath("auth.json")), /holds API keys/);
+		const seen: string[] = [];
+		await runAsUser(bob, () => walkFiles(home("bob"), (f) => (seen.push(path.basename(f)), false)));
+		assert.ok(seen.includes("notes.md") && !seen.includes("auth.json"), seen.join(","));
 	});
 
 	it("signs the user into the session cookie", () => {

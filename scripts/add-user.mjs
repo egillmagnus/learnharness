@@ -6,8 +6,9 @@
 //   LH_USERS_FILE=… node scripts/add-user.mjs <id> <home dir>   add a user
 //   LH_USERS_FILE=… node scripts/add-user.mjs <id> --reset      new password
 //
-// A new user's data, keys and course folders all live under <home dir>
-// (data/, auth.json, sources/courses/). The running server re-reads the
+// A new user's data and course folders live under <home dir>
+// (data/, sources/courses/); API keys go to keys/<id>.json beside the users
+// file, outside the agent's readable root. The running server re-reads the
 // users file on change; no restart needed.
 import { randomBytes, randomInt, scryptSync } from "node:crypto";
 import * as fs from "node:fs";

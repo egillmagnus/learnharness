@@ -21,8 +21,11 @@
  *       { "id": "anna", "passwordHash": "…", "home": "…",
  *         "dataDir": "…", "authFile": "…", "filesRoot": "…", "sourcesDir": "…" } // optional overrides
  *   ] }
- * From `home`: dataDir = home/data, authFile = home/auth.json,
- * filesRoot = home, sourcesDir = home/sources/courses.
+ * From `home`: dataDir = home/data, filesRoot = home,
+ * sourcesDir = home/sources/courses. API keys default to keys/<id>.json
+ * next to the users file — never under home, the agent's readable root
+ * (2026-10-26). The file tools also refuse every user's key file and the
+ * users file wherever they are configured (secretFiles).
  * Add users with `node scripts/add-user.mjs <id>`; the file is re-read
  * when it changes, so no restart is needed.
  */
@@ -82,7 +85,7 @@ function parseUser(raw: unknown, usersFile: string): LhUser {
 		id,
 		passwordHash: typeof r.passwordHash === "string" ? r.passwordHash : "",
 		dataDir: pick("dataDir", "data"),
-		authFile: pick("authFile", "auth.json"),
+		authFile: str("authFile") ?? path.join(path.dirname(path.resolve(usersFile)), "keys", `${id}.json`),
 		filesRoot: pick("filesRoot", ""),
 		sourcesDir: pick("sourcesDir", path.join("sources", "courses")),
 	};
@@ -100,6 +103,17 @@ export function listUsers(): LhUser[] {
 	if (new Set(users.map((u) => u.id)).size !== users.length) throw new Error(`${file}: duplicate user ids`);
 	s.cache = { file, mtimeMs, users };
 	return users;
+}
+
+/** Files no agent tool may read: every user's API keys and the users file
+ *  (password hashes), plus the single-user auth file when one is set. */
+export function secretFiles(): string[] {
+	const file = process.env.LH_USERS_FILE;
+	const single = process.env.LH_AUTH_FILE;
+	return [
+		...(file ? [path.resolve(file), ...listUsers().map((u) => u.authFile)] : []),
+		...(single ? [path.resolve(single)] : []),
+	];
 }
 
 export function findUser(id: string): LhUser | undefined {

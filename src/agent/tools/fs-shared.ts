@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { requireUser } from "../../../user-context.ts";
+import { requireUser, secretFiles } from "../../../user-context.ts";
 
 /**
  * Shared plumbing for the learner-filesystem tools (ls / find / grep) —
@@ -54,7 +54,16 @@ export function resolveSourcePath(p?: string): string {
 	if (root && !isInside(realOrResolved(root), realOrResolved(resolved))) {
 		throw new Error(`Access denied: ${p ?? "~"} is outside the learner's files (${root}).`);
 	}
+	if (secretPaths().has(realOrResolved(resolved))) {
+		throw new Error(`Access denied: ${p} holds API keys or passwords.`);
+	}
 	return resolved;
+}
+
+/** Key and password files (user-context.ts secretFiles), symlinks resolved:
+ *  refused by path and skipped by the walks, wherever they live. */
+function secretPaths(): Set<string> {
+	return new Set(secretFiles().map(realOrResolved));
 }
 
 function realOrResolved(p: string): string {
@@ -168,6 +177,8 @@ export async function walkFiles(
 	let timedOut = false;
 	let aborted = false;
 	if (signal?.aborted) return { timedOut: false, aborted: true };
+	const secrets = secretPaths();
+	const secretNames = new Set([...secrets].map((f) => path.basename(f)));
 
 	const walkDir = async (dir: string): Promise<boolean> => {
 		if (Date.now() > deadline) {
@@ -198,6 +209,8 @@ export async function walkFiles(
 				if (EXCLUDED_DIR_NAMES.has(entry.name)) continue;
 				if (await walkDir(full)) return true;
 			} else if (entry.isFile()) {
+				// realpath only on a name match: the walk stays a readdir walk.
+				if (secretNames.has(entry.name) && secrets.has(realOrResolved(full))) continue;
 				if (await visit(full)) return true;
 			}
 			// symlinks/other: not followed (pi's fd doesn't follow either)
