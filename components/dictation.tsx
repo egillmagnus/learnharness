@@ -186,6 +186,52 @@ function ensureAudioGraph(): { ctx: AudioContext; module: Promise<void> } {
 	return { ctx: sharedCtx, module: workletModule };
 }
 
+/* THE SPOKEN TEXT SURVIVES THE APP (owner, 2026-10-26 — "it just stops
+ * mid way and I get no text"): iOS suspends or reloads a backgrounded or
+ * screen-locked PWA, and the deferred buffer lived only in memory. Every
+ * final is mirrored to localStorage as it lands; the run's flush clears
+ * it, and a page that mounts with an unflushed transcript for its own path
+ * (a day at most) delivers it then. */
+const PENDING_KEY = "lh:dictation-pending";
+const PENDING_MAX_AGE_MS = 24 * 60 * 60_000;
+type PendingDictation = { path: string; text: string; at: number };
+
+/** The stored transcript this page should deliver, or null. */
+export function pendingDictationFor(raw: string | null, path: string, now: number): string | null {
+	if (!raw) return null;
+	try {
+		const p = JSON.parse(raw) as Partial<PendingDictation>;
+		if (p.path !== path || typeof p.text !== "string" || !p.text) return null;
+		if (typeof p.at !== "number" || now - p.at > PENDING_MAX_AGE_MS) return null;
+		return p.text;
+	} catch {
+		return null;
+	}
+}
+
+function savePendingDictation(text: string): void {
+	try {
+		const p: PendingDictation = { path: window.location.pathname, text, at: Date.now() };
+		localStorage.setItem(PENDING_KEY, JSON.stringify(p));
+	} catch {}
+}
+
+function clearPendingDictation(): void {
+	try {
+		localStorage.removeItem(PENDING_KEY);
+	} catch {}
+}
+
+function takePendingDictation(): string | null {
+	try {
+		const text = pendingDictationFor(localStorage.getItem(PENDING_KEY), window.location.pathname, Date.now());
+		if (text) localStorage.removeItem(PENDING_KEY);
+		return text;
+	} catch {
+		return null;
+	}
+}
+
 /** RMS (0..1) → normalized 0..1 across the audible dB window. */
 export function rmsToMeter(rms: number): number {
 	if (rms <= 0) return 0;
@@ -324,6 +370,22 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		const text = bufferRef.current.join(" ");
 		bufferRef.current = [];
 		(questionTarget ?? appendRef.current)(text);
+		clearPendingDictation();
+	}, []);
+
+	/** Screen wake lock while a run is live: a long explanation with no
+	 *  touches would otherwise auto-lock the phone, and iOS kills the mic
+	 *  with the screen. Best-effort — unsupported or refused just skips. */
+	const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
+	const holdScreenAwake = useCallback(() => {
+		const wl = (navigator as Navigator & { wakeLock?: { request: (t: "screen") => Promise<{ release: () => Promise<void> }> } }).wakeLock;
+		if (!wl || wakeLockRef.current) return;
+		wl.request("screen")
+			.then((lock) => {
+				if (dictationActiveFlag) wakeLockRef.current = lock;
+				else void lock.release().catch(() => {});
+			})
+			.catch(() => {});
 	}, []);
 
 	/** Full teardown of one run's machinery. Idempotent; generation-guarded by callers. */
@@ -331,6 +393,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		genRef.current++;
 		dictationActiveFlag = false;
 		flush(); // the deferred transcript appears when the run ends (owner round 2)
+		clearPendingDictation(); // delivered above, or discarded by cancel
+		void wakeLockRef.current?.release().catch(() => {});
+		wakeLockRef.current = null;
 		if (safetyRef.current) {
 			clearTimeout(safetyRef.current);
 			safetyRef.current = null;
@@ -391,7 +456,10 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 					// Only finals stream (interim_results=false). DEFERRED (owner
 					// round 2): they buffer here and reach the input once, at
 					// teardown — the meter is the only live feedback.
-					if (msg.is_final && text) bufferRef.current.push(text);
+					if (msg.is_final && text) {
+						bufferRef.current.push(text);
+						savePendingDictation(bufferRef.current.join(" "));
+					}
 				}
 			});
 			ws.addEventListener("close", (ev) => {
@@ -427,6 +495,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 
 	const start = useCallback(async () => {
 		dictationActiveFlag = true;
+		holdScreenAwake();
 		setError(null);
 		setPhase("connecting");
 		reconnectsRef.current = 0;
@@ -453,12 +522,22 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				return;
 			}
 			streamRef.current = stream;
+			// iOS ends the mic track when it takes the mic away (lock,
+			// call, Siri): end the run there and deliver what was said,
+			// instead of streaming silence until Deepgram gives up.
+			for (const track of stream.getAudioTracks()) {
+				track.addEventListener("ended", () => {
+					if (gen === genRef.current) stopRef.current();
+				});
+			}
 
 			// Mitigation C: app-lifetime context + memoized worklet module —
 			// per-run costs (context creation, module fetch) are gone.
 			const { ctx, module } = ensureAudioGraph();
 			await module;
-			if (ctx.state === "suspended") await ctx.resume();
+			// Safari leaves an interrupted context in "interrupted", not
+			// "suspended" — anything but running needs the resume.
+			if (ctx.state !== "running") await ctx.resume();
 			if (gen !== genRef.current) return;
 
 			const worklet = new AudioWorkletNode(ctx, "pcm-capture");
@@ -544,6 +623,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		}
 	}, [phase, cleanup]);
 
+	const stopRef = useRef(stop);
+	stopRef.current = stop;
+
 	const cancel = useCallback(() => {
 		if (phase === "idle") return;
 		// Discard first, teardown second — cleanup() flushes, and the now-empty
@@ -586,6 +668,23 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	// attached.
 	useEffect(() => {
 		warmTokens.refresh(); // pre-mint at mount (mitigation D) — silent if keyless
+		// A run the app didn't live to finish (see PENDING_KEY): its text
+		// lands now. Children's effects ran first, so a pending question's
+		// claim is already registered.
+		const text = takePendingDictation();
+		if (text) (questionTarget ?? appendRef.current)(text);
+	}, []);
+	useEffect(() => {
+		// Leaving the app mid-run: iOS is about to freeze the page and kill
+		// the mic. End the run now so Deepgram's finals land while we can
+		// still receive them; the stored copy covers a freeze that wins.
+		// Phones only: a desktop tab switch doesn't take the mic away.
+		const onHide = () => {
+			if (document.visibilityState !== "hidden" || !dictationActiveFlag) return;
+			if (window.matchMedia("(pointer: coarse)").matches) stopRef.current();
+		};
+		document.addEventListener("visibilitychange", onHide);
+		return () => document.removeEventListener("visibilitychange", onHide);
 	}, []);
 	useEffect(() => {
 		window.addEventListener("lh:kbd-toggle-dictation", toggle);
